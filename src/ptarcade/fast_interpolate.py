@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import h5py
+import jax
+import jax.numpy as jnp
 import numpy as np
-from numpy._typing import _ArrayLikeFloat_co as array_like
-from numpy.typing import NDArray
+from jax.typing import ArrayLike as jax_array_like
 
 
-def load_data(file: str) -> tuple[list[tuple[str, float, float]], NDArray]:
+def load_data(file: str) -> tuple[list[tuple[str, float, float]], jax.Array]:
     """Load HDF5 file.
 
     Read data from an HDF5 file and use it for interpolation of the spectrum.
@@ -26,34 +27,34 @@ def load_data(file: str) -> tuple[list[tuple[str, float, float]], NDArray]:
 
     Returns
     -------
-    tuple(list[tuple[str, float, float]], NDArray)
+    tuple(list[tuple[str, float, float]], jax.Array)
         Returns info: list of (name, start, step) and multidimensional array of data points
 
     """
     with h5py.File(file) as h5:
         info = [(par, h5[par][0], h5[par][1]) for par in h5['parameter_names'].asstr()]
-        spectrum = np.array(h5['spectrum'])
+        spectrum = jnp.array(h5['spectrum'])
         return (info, spectrum)
 
 
-def interp(info: list[tuple[float, float, array_like]], data: NDArray) -> NDArray:
+def interp(info: list[tuple[float, float, jax_array_like]], data: jax.Array) -> jax.Array:
     """Do interpolation.
 
     Called with info: list of (start, step, value) and multidimensional array of data points. Multiple values
-    (in an np.array) are OK for the last value, but not earlier ones or else we will get confusion about
+    (in an jnp.array) are OK for the last value, but not earlier ones or else we will get confusion about
     array indexes.
 
     Parameters
     ----------
     info : list[tuple[float, float, float]]
         list of (start, step, value)
-    data : NDArray
-        Multidimensional array of data points. Multiple values (in an np.array) are OK for the last value, but
+    data : jax.Array
+        Multidimensional array of data points. Multiple values (in an jnp.array) are OK for the last value, but
         not earlier ones or else we will get confusion about array indexes.
 
     Returns
     -------
-    NDArray
+    jax.Array
         Interpolated values
 
     """
@@ -73,7 +74,7 @@ def interp(info: list[tuple[float, float, array_like]], data: NDArray) -> NDArra
     # There is probably a much more intelligent way to solve this issue
     if getattr(x, "shape", None)==(1,):
         x = x.item() # type: ignore
-    (fract, index) = np.modf((x - x0) / dx) # type: ignore
+    (fract, index) = jnp.modf((x - x0) / dx) # type: ignore
     index = index.astype(int)
     # Call ourselves to interpolate over remaining variables if any
     # then combine results linearly

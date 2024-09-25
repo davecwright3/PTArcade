@@ -49,15 +49,20 @@ from functools import cache
 from importlib.resources import files
 from typing import Any, Literal
 
+import jax
+import jax.numpy as jnp
 import natpy as nat
 import numpy as np
 import scipy.stats as ss
 from enterprise.signals import parameter
 from enterprise.signals.parameter import function
+from jax.typing import ArrayLike as jax_array_like
 from numpy._typing import _ArrayLikeFloat_co as array_like
 from numpy.typing import NDArray
 
 from ptarcade import fast_interpolate
+
+jax.config.update("jax_enable_x64", True)  # Use double precision
 
 log = logging.getLogger("rich")
 nat.set_active_units("HEP")
@@ -114,6 +119,30 @@ def g_rho(x: array_like, is_freq: bool = False) -> array_like:  # noqa: FBT001, 
 
     return dof
 
+def g_rho_jax(x: jax_array_like, is_freq: bool = False) -> jax_array_like:  # noqa: FBT001, FBT002
+    """Return the number of relativistic degrees of freedom as a function of T/GeV or f/Hz.
+
+    Parameters
+    ----------
+    x : array_like
+        The temperature(s) [GeV] or frequency/frequencies [Hz].
+    is_freq : bool, optional
+        True if `x` is a frequency/frequencies, False if temperature(s).
+        Defaults to False.
+
+    Returns
+    -------
+    dof : array_like
+        The relativistic degrees of freedom at `x`.
+
+    """
+    if is_freq:
+        dof = jnp.interp(x, gs[:, 1], gs[:, 3])
+
+    else:
+        dof = jnp.interp(x, gs[:, 0], gs[:, 3])
+
+    return dof
 
 def g_s(x: array_like, is_freq: bool = False) -> array_like:  # noqa: FBT001, FBT002
     """Return the number of entropic relativistic degrees of freedom as a function of T/GeV or f/Hz.
@@ -140,6 +169,30 @@ def g_s(x: array_like, is_freq: bool = False) -> array_like:  # noqa: FBT001, FB
 
     return dof
 
+def g_s_jax(x: jax_array_like, is_freq: bool = False) -> jax_array_like:  # noqa: FBT001, FBT002
+    """Return the number of entropic relativistic degrees of freedom as a function of T/GeV or f/Hz.
+
+    Parameters
+    ----------
+    x : array_like
+        The temperature(s) [GeV] or frequency/frequencies [Hz].
+    is_freq : bool, optional
+        True if `x` is a frequency/frequencies, False if temperature(s).
+        Defaults to False.
+
+    Returns
+    -------
+    dof : array_like
+        The entropic relativistic degrees of freedom at `x`.
+
+    """
+    if is_freq:
+        dof = jnp.interp(x, gs[:, 1], gs[:, 2])
+
+    else:
+        dof = jnp.interp(x, gs[:, 0], gs[:, 2])
+
+    return dof
 
 # We cache the following functions so that they only run once and then cache the result
 # They are never called with a different argument, so they only have to be computed once
@@ -427,6 +480,36 @@ def freq_at_temp(T: array_like) -> array_like:
 
     return prefactor * sqr_term
 
+def freq_at_temp_jax(T: array_like) -> array_like:
+    """Find frequency today as function of temperature when GW was horizon size.
+
+    Calculates the GW frequency [Hz] today as a function of the universe temperature [GeV]
+    when the GW was of horizon size.
+
+    Parameters
+    ----------
+    T : array_like
+        The universe temperature [GeV] at the time when the GW was of horizon size.
+
+    Returns
+    -------
+    NDArray
+        The GW frequency [Hz] today that was of horizon size when the universe was at temperature `T` [GeV].
+    """
+    f_0 = H_0_Hz / (2 * np.pi)
+
+    T_ratio = T_0 / T # type: ignore
+    g_ratio = g_rho_0 / g_rho_jax(T) # type: ignore
+    gs_ratio = g_s_0 / g_s_jax(T) # type: ignore
+
+    prefactor = f_0 * (gs_ratio) ** (1 / 3) * T_ratio
+    sqr_term = jnp.sqrt(
+        omega_v
+        + (gs_ratio**-1 * T_ratio**-3 * omega_m)
+        + (g_ratio**-1 * T_ratio**-4 * omega_r)
+    )
+
+    return prefactor * sqr_term
 
 def temp_at_freq(f: array_like) -> NDArray:
     """Get the temperature [GeV] of the universe when a gravitational wave of a
@@ -445,6 +528,22 @@ def temp_at_freq(f: array_like) -> NDArray:
     """
     return np.interp(f, gs[:, 1], gs[:, 0], left=np.nan, right=np.nan)
 
+def temp_at_freq_jax(f: array_like) -> NDArray:
+    """Get the temperature [GeV] of the universe when a gravitational wave of a
+    certain frequency [Hz] today was of horizon size.
+
+    Parameters
+    ----------
+    f : array_like
+        The frequency in Hz today.
+
+    Returns
+    -------
+    NDArray
+        The temperature [GeV] when the GW at frequency `f` [Hz] was of horizon size.
+
+    """
+    return jnp.interp(f, gs[:, 1], gs[:, 0], left=jnp.nan, right=jnp.nan)
 
 class ParamDict(UserDict):
     """UserDict child class that instantiates common or uncommon parameter priors.
